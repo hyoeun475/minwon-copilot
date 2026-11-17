@@ -1,36 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 특이민원 심리·대응 코파일럿 (교육용 MVP)
 
-## Getting Started
+노동감독관 교육 과정에서 **가상의** 특이민원 사례를 입력하면 위험 신호, 가능한 심리적 기제(가설), 대응전략, 현장 대응 문장, 기록·보고사항을 정리해 주는 웹서비스입니다.
 
-First, run the development server:
+> 교육용 가상 사건 전용입니다. 실제 사건 원문·개인정보·수사기록을 입력하지 마세요.
+> 결과는 참고자료이며 정신의학적 진단이나 법적 판단이 아닙니다. 최종 판단은 담당자와 소속 기관이 합니다.
+
+## 실행
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local   # ANTHROPIC_API_KEY 입력
+npm run dev                  # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+API 키가 없어도 실행됩니다. 이 경우 AI 분석 없이 규칙 기반 기본 안내만 표시됩니다.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 동작 방식
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+요청 한 건은 서버(`app/api/analyze/route.ts`)에서 다음 순서로 처리됩니다.
 
-## Learn More
+1. **입력 검증** — 길이, 선택 항목, "가상 사례 확인" 체크 (`lib/schema.ts`)
+2. **개인정보 차단** — 주민등록번호·전화번호·이메일 등이 감지되면 AI로 보내지 않고 거부 (`lib/pii.ts`)
+3. **규칙 기반 위험 등급** — 체크된 "확인된 행동"만으로 등급 결정 (`lib/riskRules.ts`)
+4. **Claude 분석** — 구조화 출력(JSON 스키마)으로 요약·가설·전략·문장 생성 (`lib/analyze.ts`, `lib/prompt.ts`)
+5. **사후 검증** — 진단성 표현, 죄명, 미검증 법령·판례 인용을 삭제 (`lib/guard.ts`)
+6. **서버 강제 병합** — 긴급 시 안전 대응 전략을 맨 앞에 고정, 근거자료는 선별 목록만 허용
 
-To learn more about Next.js, take a look at the following resources:
+AI 호출이 실패하거나 거절되면 3번의 규칙 결과와 기본 지침(`lib/playbook.ts`)으로 응답합니다.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 분석 원칙이 코드에서 지켜지는 위치
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| 원칙 | 구현 |
+| --- | --- |
+| 위험 신호는 확인된 행동에 근거 | 등급은 `riskRules.ts`만 결정. AI 출력 스키마에 등급 필드가 없음 |
+| 폭언·반복 연락만으로 고위험 단정 금지 | 해당 행동의 등급 상한은 "주의" |
+| 정당한 권리 고려 | 감사·고소·언론 제보·녹음 예고는 "일반"으로 분류하고 권리 행사로 표시 |
+| 즉각적 위해 가능성이 있으면 안전 우선 | 긴급 등급이면 즉시 행동 목록과 안전 전략을 서버가 맨 앞에 배치 |
+| 진단·범죄성 판단 금지 | 프롬프트 지시 + `guard.ts` 패턴 삭제 |
+| 확인되지 않은 법령·판례 생성 금지 | AI는 `references.ts`의 id만 선택 가능. 본문의 조문·판례 표기는 삭제 |
+| 입력 미저장, 원문 로그 금지 | DB 없음. 서버 로그에는 오류 종류와 상태 코드만 기록 |
+| 외부 문서를 지시로 실행하지 않음 | 사례 서술은 태그로 감싸 자료로만 취급하도록 지시. 업로드 기능 없음 |
 
-## Deploy on Vercel
+## 시연 전에 할 일
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **근거자료 원문 확인** — `lib/references.ts`의 모든 항목은 `checkedAt: null`("원문 확인 필요")입니다. 조문 번호·제목·링크를 국가법령정보센터 등에서 직접 확인한 뒤 확인일을 채우세요.
+- **기본 지침 검토** — `lib/playbook.ts`의 전략·문장은 교육용 초안입니다. 소속 기관 지침과 대조해 수정하세요.
+- **AI 서비스 전송 고지** — 입력은 서버에 저장되지 않지만 분석을 위해 Anthropic API로 전송됩니다. API 계정의 데이터 보존 설정을 확인하세요.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 1차 범위에서 제외한 것
+
+실제 사건 입력, 파일 업로드, 로그인·권한 관리, 분석 이력 저장, 공공기관 내부망 연계.
+
+## 알려진 한계
+
+- 개인정보 감지는 패턴 기반입니다. 실명은 오탐·미탐이 있어 경고만 합니다.
+- 요청 제한은 메모리 기반(1분 8회)이라 서버가 여러 대이면 외부 저장소로 바꿔야 합니다.
+- AI 분석은 30초~1분 30초가 걸립니다. `lib/analyze.ts`의 `effort`로 속도와 깊이를 조절합니다.
